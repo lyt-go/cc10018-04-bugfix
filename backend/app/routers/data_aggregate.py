@@ -94,11 +94,24 @@ def run_action(entry_id: int, payload: ActionPayload) -> ActionResult:
 
 @router.get("/{entry_id}/compute-plan")
 def get_compute_plan(entry_id: int) -> dict:
-    """获取聚合配置的计算计划（指标域→派生指标→聚合的完整链路）。"""
+    """获取聚合配置的计算计划（指标域→派生指标→聚合的完整链路）。
+
+    计划里带派生指标依赖校验报告；循环分支与缺少有效父指标的分支不会进入计算步骤，
+    同时用 scope 标明本次计算是完整报表还是部分结果。
+    """
     plan = service.get_compute_plan(entry_id)
     if not plan.get("ok"):
         raise HTTPException(status_code=404, detail=plan)
     return plan
+
+
+@router.get("/{entry_id}/dependency-report")
+def get_dependency_report(entry_id: int) -> dict:
+    """返回聚合配置的派生指标依赖校验报告：影响的指标、引用路径与循环。"""
+    report = service.get_dependency_report(entry_id)
+    if not report.get("ok") and report.get("error"):
+        raise HTTPException(status_code=404, detail=report)
+    return report
 
 
 @router.get("/{entry_id}/preview-sql")

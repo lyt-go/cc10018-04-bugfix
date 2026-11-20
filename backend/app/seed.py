@@ -40,6 +40,19 @@ SEED_ROWS: dict[str, list[dict[str, Any]]] = {
         {"id": 6, "status": "草稿", "pending": True, "abnormal": False,
          "指标编号": "DERI-RETENTION", "父指标编号": "METR-USER", "计算公式": "COUNT(DISTINCT 回流用户)/COUNT(DISTINCT 新增用户)", "统计周期": "周",
          "业务限定": "注册后7日内", "统计粒度": "周", "精度位数": "4", "口径版本": "v1.0"},
+        # 依赖校验演示组：甲⇄乙互相引用，丙独立，丁依赖已陷入循环的甲
+        {"id": 7, "status": "已生效", "pending": False, "abnormal": False,
+         "指标编号": "DERI-JIA", "父指标编号": "DERI-YI", "计算公式": "SUM(订单金额)", "统计周期": "日",
+         "业务限定": "订单状态=已完成", "统计粒度": "天", "精度位数": "2", "口径版本": "v1.0"},
+        {"id": 8, "status": "已生效", "pending": False, "abnormal": False,
+         "指标编号": "DERI-YI", "父指标编号": "DERI-JIA", "计算公式": "SUM(订单金额)/COUNT(DISTINCT 用户ID)", "统计周期": "日",
+         "业务限定": "无", "统计粒度": "天", "精度位数": "2", "口径版本": "v1.0"},
+        {"id": 9, "status": "已生效", "pending": False, "abnormal": False,
+         "指标编号": "DERI-BING", "父指标编号": "METR-TRADE", "计算公式": "COUNT(DISTINCT 订单编号)", "统计周期": "日",
+         "业务限定": "订单状态=已完成", "统计粒度": "天/店铺", "精度位数": "0", "口径版本": "v1.0"},
+        {"id": 10, "status": "已生效", "pending": False, "abnormal": False,
+         "指标编号": "DERI-DING", "父指标编号": "DERI-JIA", "计算公式": "SUM(退款金额)", "统计周期": "日",
+         "业务限定": "订单状态=已退款", "统计粒度": "天", "精度位数": "2", "口径版本": "v1.0"},
     ],
     "api_service": [
         {"id": 1, "status": "已发布", "pending": False, "abnormal": False,
@@ -194,6 +207,11 @@ SEED_ROWS: dict[str, list[dict[str, Any]]] = {
         {"id": 4, "status": "待校验", "pending": True, "abnormal": False,
          "配置编号": "AGG-LOGIS-001", "数据来源": "METR-LOGIS", "聚合维度": "dt,warehouse_id", "聚合函数": "AVG(delivery_hours)",
          "过滤条件": "delivery_hours<168", "输出表名": "ads_logis_delivery_daily", "增量键": "dt", "更新策略": "增量覆盖"},
+        # 同一配置里既有循环分支（甲、乙）又有正常分支（丙），丁依赖被拦截的甲
+        {"id": 5, "status": "已生效", "pending": False, "abnormal": False,
+         "配置编号": "AGG-MIXED-001", "数据来源": "METR-TRADE,DERI-JIA,DERI-YI,DERI-BING,DERI-DING",
+         "聚合维度": "dt,shop_id", "聚合函数": "SUM(订单金额),COUNT(DISTINCT 订单编号)",
+         "过滤条件": "dt>=2026-01-01", "输出表名": "ads_trade_mixed_daily", "增量键": "dt", "更新策略": "增量覆盖"},
     ],
     "data_cleanse": [
         {"id": 1, "status": "已生效", "pending": False, "abnormal": False,

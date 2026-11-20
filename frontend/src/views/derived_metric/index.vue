@@ -48,6 +48,9 @@
             >
               {{ action }}
             </button>
+            <button class="link" type="button" :data-testid="`dependency-${row.id}`" @click="openDependency(row)">
+              查看父指标依赖
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -72,6 +75,44 @@
       </form>
     </div>
 
+    <div v-if="dependencyDetail" class="modal-backdrop" data-testid="dependency-modal">
+      <div class="modal">
+        <h3>父指标依赖核对 · {{ dependencyDetail.metric_code }}</h3>
+        <dl class="dependency-detail">
+          <dt>父指标</dt>
+          <dd>{{ dependencyDetail.parent_metric || '—（缺少有效父指标）' }}</dd>
+          <dt>引用路径</dt>
+          <dd data-testid="dependency-path">{{ dependencyDetail.dependency_path.join(' → ') }}</dd>
+          <dt>校验结果</dt>
+          <dd :data-testid="`dependency-status-${dependencyDetail.valid ? 'ok' : 'blocked'}`">
+            {{ dependencyDetail.valid ? '依赖可用' : '依赖不可用' }}
+          </dd>
+        </dl>
+        <table class="data-table">
+          <thead>
+            <tr><th>父指标编号</th><th>类型</th><th>状态</th><th>是否有效</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="parent in dependencyDetail.parents" :key="parent.metric_code || 'empty'">
+              <td>{{ parent.metric_code || '—' }}</td>
+              <td>{{ parent.kind }}</td>
+              <td>{{ parent.status ?? '不存在' }}</td>
+              <td>{{ parent.valid ? '有效' : '无效' }}</td>
+            </tr>
+            <tr v-if="!dependencyDetail.parents.length">
+              <td colspan="4" class="empty-state">未声明父指标</td>
+            </tr>
+          </tbody>
+        </table>
+        <ul v-if="dependencyDetail.issues.length" class="dependency-issues" data-testid="dependency-issues">
+          <li v-for="issue in dependencyDetail.issues" :key="issue">{{ issue }}</li>
+        </ul>
+        <div class="page-actions">
+          <button class="btn" type="button" data-testid="close-dependency" @click="dependencyDetail = null">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条派生指标记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -85,6 +126,25 @@ import { computed, onMounted, ref } from 'vue'
 import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
+
+type DependencyParent = {
+  metric_code: string
+  kind: string
+  exists: boolean
+  status: string | null
+  valid: boolean
+}
+
+type DependencyDetail = {
+  metric_code: string
+  parent_metric: string
+  parents: DependencyParent[]
+  dependency_path: string[]
+  cycle: boolean
+  path_cycle: string[]
+  issues: string[]
+  valid: boolean
+}
 
 const ENDPOINT = '/api/derived_metric'
 const columns = ["指标编号", "父指标编号", "计算公式", "统计周期", "业务限定", "统计粒度", "精度位数", "口径版本"]
@@ -100,6 +160,7 @@ const filterFields = columns.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const dependencyDetail = ref<DependencyDetail | null>(null)
 const stats = computed(() => [
   { label: metricNames[0], value: total.value },
   { label: metricNames[1], value: rows.value.filter((row) => row.status === statuses[1]).length },
@@ -165,6 +226,19 @@ async function runAction(action: string, row: Row) {
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '派生指标操作失败'
+  }
+}
+
+async function openDependency(row: Row) {
+  errorMessage.value = ''
+  try {
+    const response = await request(`${ENDPOINT}/${row.id}`)
+    if (!response.ok) throw new Error('派生指标详情读取失败')
+    const payload = await response.json()
+    if (!payload._dependency) throw new Error('详情未返回父指标依赖信息')
+    dependencyDetail.value = payload._dependency as DependencyDetail
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '派生指标详情读取失败'
   }
 }
 

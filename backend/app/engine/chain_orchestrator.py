@@ -89,8 +89,24 @@ class ChainOrchestrator:
             result["steps"].append({"step": 4, "module": "data_aggregate", "status": "warning", "detail": f"聚合配置状态为 {agg.get('status')}"})
         else:
             plan = self.calculator.build_compute_plan(aggregate_id)
-            result["steps"].append({"step": 4, "module": "data_aggregate", "status": "ok", "detail": f"聚合计划生成成功，共 {len(plan.get('steps', []))} 步"})
+            scope = plan.get("scope", {})
+            if not plan.get("executable", True):
+                result["ok"] = False
+                result["steps"].append({
+                    "step": 4, "module": "data_aggregate", "status": "error",
+                    "detail": f"依赖校验未通过，无可执行分支（{scope.get('label', '不可执行')}）",
+                })
+            elif scope.get("mode") == "partial":
+                result["steps"].append({
+                    "step": 4, "module": "data_aggregate", "status": "warning",
+                    "detail": (
+                        f"聚合计划生成成功，共 {len(plan.get('steps', []))} 步；"
+                        f"仅部分计算（{scope.get('delivery')}）"),
+                })
+            else:
+                result["steps"].append({"step": 4, "module": "data_aggregate", "status": "ok", "detail": f"聚合计划生成成功，共 {len(plan.get('steps', []))} 步"})
             result["compute_plan"] = plan
+            result["dependency_report"] = plan.get("dependency_report")
 
         return result
 

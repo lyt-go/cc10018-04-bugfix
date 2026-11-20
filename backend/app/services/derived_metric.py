@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.engine.metric_calculator import MetricCalculator
 from app.store import store
 
 MODULE = "derived_metric"
@@ -35,7 +36,12 @@ class DerivedMetricService:
         return rows[start:start + size], total
 
     def get_entry(self, entry_id: int) -> dict[str, Any] | None:
-        return store.find(MODULE, entry_id)
+        entry = store.find(MODULE, entry_id)
+        if entry:
+            # 附加父指标关系与引用路径，供详情页核对依赖
+            calc = MetricCalculator()
+            entry["_dependency"] = calc.explain_metric_dependency(entry.get("指标编号", ""))
+        return entry
 
     def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
         missing = [field for field in REQUIRED_FIELDS if not str(values.get(field) or "").strip()]

@@ -48,6 +48,9 @@
             >
               {{ action }}
             </button>
+            <button class="link" type="button" :data-testid="`plan-${row.id}`" @click="loadPlan(row)">
+              生成计算计划
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -72,6 +75,74 @@
       </form>
     </div>
 
+    <section v-if="plan" class="plan-panel" data-testid="compute-plan">
+      <div class="plan-head">
+        <h3>计算计划 · {{ plan.aggregate_code ?? plan.aggregate_id }}</h3>
+        <span class="plan-badge" :class="`mode-${plan.scope.mode}`" data-testid="plan-scope">
+          {{ plan.scope.label }}
+        </span>
+        <span class="plan-badge" data-testid="plan-delivery">{{ plan.scope.delivery }}</span>
+        <button class="btn ghost" type="button" data-testid="close-plan" @click="plan = null">收起</button>
+      </div>
+      <p class="plan-note" data-testid="plan-note">{{ plan.scope.note }}</p>
+      <p v-if="plan.scope.conflict" class="dependency-issues" data-testid="plan-conflict">
+        {{ plan.scope.conflict }}
+      </p>
+      <table v-if="plan.scope.delivery_options.length > 1" class="sub-table" data-testid="plan-delivery-options">
+        <thead><tr><th>交付口径</th><th>范围</th><th>可按完整报表交付</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr v-for="option in plan.scope.delivery_options" :key="option.mode">
+            <td>{{ option.label }}</td>
+            <td>{{ option.metrics.length ? option.metrics.join('、') : '—' }}</td>
+            <td>{{ option.report_ready ? '是' : '否' }}</td>
+            <td>{{ option.note }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table class="sub-table" data-testid="plan-steps">
+        <thead>
+          <tr><th>步骤</th><th>类型</th><th>对象</th><th>说明</th><th>依赖路径</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="step in plan.steps" :key="step.step" :data-testid="`plan-step-${step.step}`">
+            <td>{{ step.step }}</td>
+            <td>{{ step.type }}</td>
+            <td>{{ step.metric_code ?? step.domain_code ?? step.output_table }}</td>
+            <td>{{ step.description }}</td>
+            <td>{{ step.dependency_path?.join(' → ') ?? '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>派生指标依赖校验报告</h4>
+      <table class="sub-table" data-testid="dependency-report">
+        <thead>
+          <tr><th>指标</th><th>父指标</th><th>引用路径</th><th>可执行</th><th>问题</th></tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="item in plan.dependency_report.metrics"
+            :key="item.metric_code"
+            :class="{ 'plan-blocked-row': !item.available }"
+            :data-testid="`dependency-row-${item.metric_code}`"
+            :data-available="item.available ? 'true' : 'false'"
+          >
+            <td>{{ item.metric_code }}</td>
+            <td>{{ item.parent || '—' }}</td>
+            <td>{{ item.dependency_path.join(' → ') }}</td>
+            <td>{{ item.available ? '是' : '否' }}</td>
+            <td>{{ item.issues.length ? item.issues.join('；') : '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="plan.dependency_report.cycles.length" class="dependency-issues" data-testid="plan-cycles">
+        <span v-for="cycle in plan.dependency_report.cycles" :key="cycle.path.join('-')">
+          循环依赖：{{ cycle.path.join(' → ') }}
+        </span>
+      </p>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条数据聚合记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -85,6 +156,50 @@ import { computed, onMounted, ref } from 'vue'
 import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
+
+type PlanStep = {
+  step: number
+  type: string
+  domain_code?: string
+  metric_code?: string
+  output_table?: string
+  description: string
+  dependency_path?: string[]
+}
+
+type DependencyMetric = {
+  metric_code: string
+  parent: string
+  dependency_path: string[]
+  available: boolean
+  issues: string[]
+}
+
+type ComputePlan = {
+  aggregate_id: number
+  aggregate_code?: string
+  executable: boolean
+  complete: boolean
+  scope: {
+    mode: 'complete' | 'partial' | 'blocked'
+    label: string
+    delivery: string
+    note: string
+    conflict?: string
+    delivery_options: {
+      mode: string
+      label: string
+      metrics: string[]
+      report_ready: boolean
+      note: string
+    }[]
+  }
+  steps: PlanStep[]
+  dependency_report: {
+    metrics: DependencyMetric[]
+    cycles: { path: string[] }[]
+  }
+}
 
 const ENDPOINT = '/api/data_aggregate'
 const columns = ["配置编号", "数据来源", "聚合维度", "聚合函数", "过滤条件", "输出表名", "增量键", "更新策略"]
@@ -100,6 +215,7 @@ const filterFields = columns.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const plan = ref<ComputePlan | null>(null)
 const stats = computed(() => [
   { label: metricNames[0], value: total.value },
   { label: metricNames[1], value: rows.value.filter((row) => row.status === statuses[1]).length },
@@ -165,6 +281,19 @@ async function runAction(action: string, row: Row) {
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '数据聚合操作失败'
+  }
+}
+
+async function loadPlan(row: Row) {
+  errorMessage.value = ''
+  try {
+    const response = await request(`${ENDPOINT}/${row.id}/compute-plan`)
+    if (!response.ok) throw new Error('计算计划生成失败')
+    const payload = (await response.json()) as ComputePlan
+    plan.value = { ...payload, aggregate_code: String(row['配置编号'] ?? row.id) }
+  } catch (error) {
+    plan.value = null
+    errorMessage.value = error instanceof Error ? error.message : '计算计划生成失败'
   }
 }
 

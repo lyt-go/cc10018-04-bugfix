@@ -38,9 +38,12 @@ class DataAggregateService:
     def get_entry(self, entry_id: int) -> dict[str, Any] | None:
         entry = store.find(MODULE, entry_id)
         if entry:
-            # 附加计算计划预览
+            # 附加计算计划预览与派生指标依赖校验报告
             calc = MetricCalculator()
-            entry["_compute_plan"] = calc.build_compute_plan(entry_id)
+            plan = calc.build_compute_plan(entry_id)
+            entry["_compute_plan"] = plan
+            entry["_dependency_report"] = plan.get("dependency_report", {"ok": False})
+            entry["_compute_scope"] = plan.get("scope", {})
             entry["_preview_sql"] = calc.preview_sql(entry_id)
         return entry
 
@@ -100,3 +103,19 @@ class DataAggregateService:
     def get_compute_plan(self, entry_id: int) -> dict[str, Any]:
         calc = MetricCalculator()
         return calc.build_compute_plan(entry_id)
+
+    def get_dependency_report(self, entry_id: int) -> dict[str, Any]:
+        """单独返回聚合配置的派生指标依赖校验报告。"""
+        entry = store.find(MODULE, entry_id)
+        if entry is None:
+            return {"ok": False, "error": f"聚合配置 {entry_id} 不存在或已归档"}
+        metric_codes = [
+            part.strip()
+            for part in str(entry.get("数据来源", "")).split(",")
+            if part.strip().startswith("DERI-")
+        ]
+        calc = MetricCalculator()
+        report = calc.build_dependency_report(metric_codes)
+        report["aggregate_id"] = entry_id
+        report["aggregate_code"] = entry.get("配置编号", "")
+        return report
